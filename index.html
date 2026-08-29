@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mitglieder – Live-Zähler</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;display:grid;place-items:center;
+  font-family:Arial,Helvetica,sans-serif;color:#fff;
+  background:linear-gradient(135deg,#0b1220,#172554,#0f172a);
+}
+.card{
+  width:min(92vw,620px);padding:52px 28px;text-align:center;
+  border:1px solid rgba(255,255,255,.14);border-radius:30px;
+  background:rgba(255,255,255,.07);backdrop-filter:blur(18px);
+  box-shadow:0 30px 90px rgba(0,0,0,.45)
+}
+.small{font-size:13px;letter-spacing:.16em;text-transform:uppercase;opacity:.55}
+h1{margin:10px 0 0;font-size:clamp(28px,6vw,44px)}
+#count{margin:18px 0 8px;font-size:clamp(90px,22vw,155px);line-height:.9;font-weight:900}
+.label{font-size:19px;opacity:.78}
+#status{margin-top:28px;min-height:18px;font-size:13px;opacity:.6}
+.error{color:#ffb4b4!important;opacity:1!important}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="small">Live-Mitgliederzähler</div>
+  <h1>Mitglieder</h1>
+  <div id="count">–</div>
+  <div class="label">mit ausgewähltem Rang</div>
+  <div id="status">Lade Tabelle …</div>
+</main>
+
+<script>
+const SHEET_ID = "1vijhjJcCv_M45g-1X8t_H2u9y1A6btWEJ6zL17di4Dk";
+const GID = "0";
+const REFRESH_MS = 60000;
+
+// Texte, die definitiv keinen gewählten Rang darstellen.
+const EMPTY_VALUES = new Set([
+  "", "-", "–", "—", "null", "undefined", "leer", "keine auswahl", "keine auswahl"
+]);
+
+function clean(value) {
+  return String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\u200B/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function hasSelectedRank(value) {
+  const v = clean(value);
+  return v !== "" && !EMPTY_VALUES.has(v);
+}
+
+function setStatus(message, error=false) {
+  const el = document.getElementById("status");
+  el.textContent = message;
+  el.classList.toggle("error", error);
+}
+
+let callbackId = 0;
+
+function loadMembers() {
+  const callback = "__membersSheet_" + (++callbackId);
+  const scriptId = "sheetLoader_" + callbackId;
+
+  window[callback] = function(data) {
+    try {
+      const table = data?.table;
+      if (!table) throw new Error("Keine Daten von Google Sheets erhalten.");
+
+      const cols = table.cols || [];
+      const rows = table.rows || [];
+
+      // Nur die echte Spalte "Rang" verwenden.
+      let rankIndex = cols.findIndex(c =>
+        clean(c.label) === "rang"
+      );
+
+      // Fallback, falls Google den Header leicht verändert liefert.
+      if (rankIndex === -1) {
+        rankIndex = cols.findIndex(c =>
+          clean(c.label).includes("rang")
+        );
+      }
+
+      if (rankIndex === -1) {
+        throw new Error('Die Spalte "Rang" konnte nicht gefunden werden.');
+      }
+
+      let count = 0;
+
+      for (const row of rows) {
+        const cell = row?.c?.[rankIndex];
+        if (!cell) continue;
+
+        // "f" ist die sichtbare Darstellung. Für die Zählung hat diese
+        // Vorrang vor dem Rohwert "v", damit Formeln/Formatierungen mit
+        // scheinbar leeren Zellen nicht als Rang gezählt werden.
+        const visible = cell.f ?? cell.v ?? "";
+
+        if (hasSelectedRank(visible)) {
+          count++;
+        }
+      }
+
+      document.getElementById("count").textContent =
+        count.toLocaleString("de-DE");
+
+      setStatus(
+        "Automatisch aktualisiert: " +
+        new Date().toLocaleTimeString("de-DE")
+      );
+    } catch (err) {
+      setStatus("Fehler: " + err.message, true);
+    }
+
+    const old = document.getElementById(scriptId);
+    if (old) old.remove();
+    delete window[callback];
+  };
+
+  const script = document.createElement("script");
+  script.id = scriptId;
+  script.onerror = () => {
+    setStatus(
+      "Google Sheet konnte nicht gelesen werden. Stelle die Tabelle auf " +
+      "„Jeder mit dem Link → Betrachter“.",
+      true
+    );
+    const old = document.getElementById(scriptId);
+    if (old) old.remove();
+    delete window[callback];
+  };
+
+  script.src =
+    "https://docs.google.com/spreadsheets/d/" +
+    SHEET_ID +
+    "/gviz/tq?gid=" +
+    encodeURIComponent(GID) +
+    "&tqx=responseHandler:" +
+    encodeURIComponent(callback) +
+    "&headers=1&t=" +
+    Date.now();
+
+  document.body.appendChild(script);
+}
+
+loadMembers();
+setInterval(loadMembers, REFRESH_MS);
+</script>
+</body>
+</html>
